@@ -4,9 +4,8 @@ on:
   push:
     branches: ["main"]
 
+# ---------------- BUILD ----------------
 jobs:
-
-# ---------------- BUILD + TEST ----------------
   build:
     runs-on: self-hosted
 
@@ -20,14 +19,14 @@ jobs:
           distribution: "temurin"
           cache: maven
 
-      - name: Build + Test
+      - name: Build Application (compile + test + package)
         run: mvn clean package
 
-      - name: Verify JAR
+      - name: Verify build output
         run: ls -la target
 
 
-# ---------------- SECURITY SCAN ----------------
+# ---------------- SECURITY ----------------
   security-check:
     runs-on: self-hosted
     needs: build
@@ -44,7 +43,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y trivy
 
-      - name: Trivy Scan
+      - name: Trivy Scan (safe mode)
         run: |
           trivy fs . \
             --scanners secret,misconfig \
@@ -54,11 +53,10 @@ jobs:
             -o trivy-report.json
 
       - name: Install Gitleaks
-        run: sudo apt install gitleaks -y
+        run: sudo apt-get install -y gitleaks
 
       - name: Gitleaks Scan
-        run: |
-          gitleaks detect --source . -r gitleaks-report.json -f json
+        run: gitleaks detect --source . -r gitleaks-report.json -f json
 
 
 # ---------------- UNIT TEST ----------------
@@ -97,7 +95,7 @@ jobs:
           distribution: "temurin"
           cache: maven
 
-      - name: Build for Sonar
+      - name: Build for Sonar Analysis
         run: mvn clean verify
 
       - name: SonarQube Scan
@@ -106,7 +104,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
-      - name: Quality Gate
+      - name: Quality Gate Check
         uses: sonarsource/sonarqube-quality-gate-action@master
         with:
           pollingTimeoutSec: 600
@@ -115,8 +113,8 @@ jobs:
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
 
-# ---------------- DOCKER ----------------
-  docker-build:
+# ---------------- DOCKER BUILD & PUSH ----------------
+  docker:
     runs-on: self-hosted
     needs: sonar
 
