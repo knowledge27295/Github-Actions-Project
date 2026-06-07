@@ -19,7 +19,7 @@ jobs:
           cache: maven
 
       - name: Build with Maven
-        run: mvn compile
+        run: mvn -B clean compile
 
   security-check:
     runs-on: ubuntu-latest
@@ -28,7 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Install Trivy (modern way)
+      # ---------------------------
+      # TRIVY INSTALL
+      # ---------------------------
       - name: Install Trivy
         run: |
           sudo apt-get update -y
@@ -38,15 +40,42 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y trivy
 
-      # IMPORTANT FIX: disable vuln scanning (prevents Maven 429 issue)
-      - name: Trivy FS Scan (safe mode)
-        run: trivy fs . --scanners secret,misconfig --format table -o fs-report.json
+      # ---------------------------
+      # TRIVY (SAFE MODE - NO MAVEN CALLS)
+      # ---------------------------
+      - name: Trivy Scan (Secrets + Misconfig only)
+        run: |
+          trivy fs . \
+            --scanners secret,misconfig \
+            --skip-files pom.xml \
+            --skip-dirs target,.m2 \
+            --format table \
+            -o trivy-report.json
 
+      # ---------------------------
+      # GITLEAKS (BEST SECRET SCANNER)
+      # ---------------------------
       - name: Install Gitleaks
         run: |
           wget -qO gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_8.18.4_linux_x64.tar.gz
           tar -xzf gitleaks.tar.gz
           sudo mv gitleaks /usr/local/bin/
 
-      - name: Gitleaks Code Scan
-        run: gitleaks detect --source . -r gitleaks-report.json -f json --exit-code 1
+      - name: Run Gitleaks Scan
+        run: |
+          gitleaks detect \
+            --source . \
+            -r gitleaks-report.json \
+            -f json \
+            --exit-code 1
+
+      # ---------------------------
+      # UPLOAD REPORTS (optional but recommended)
+      # ---------------------------
+      - name: Upload Security Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            trivy-report.json
+            gitleaks-report.json
