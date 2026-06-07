@@ -1,13 +1,18 @@
 name: CICD Pipeline
+
 on:
   push:
     branches: ["main"]
 
 jobs:
-  compile:
+
+# ---------------- BUILD + TEST ----------------
+  build:
     runs-on: self-hosted
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -15,16 +20,21 @@ jobs:
           distribution: "temurin"
           cache: maven
 
-      - name: Build with Maven
-        run: mvn clean compile
+      - name: Build + Test
+        run: mvn clean package
 
+      - name: Verify JAR
+        run: ls -la target
+
+
+# ---------------- SECURITY SCAN ----------------
   security-check:
     runs-on: self-hosted
-    needs: compile
+    needs: build
+
     steps:
       - uses: actions/checkout@v4
 
-      # TRIVY INSTALL
       - name: Install Trivy
         run: |
           sudo apt-get update -y
@@ -33,10 +43,8 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/trivy.asc] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
           sudo apt-get update -y
           sudo apt-get install -y trivy
-          
-      ## TRIVY (SAFE MODE - NO MAVEN CALLS)
-      ##Scan the repository for secrets and misconfigurations, ignore Java/Maven-related files that cause errors, and save the results in a report file.
-      - name: Trivy Scan 
+
+      - name: Trivy Scan
         run: |
           trivy fs . \
             --scanners secret,misconfig \
@@ -45,98 +53,91 @@ jobs:
             --format table \
             -o trivy-report.json
 
-      - name: Gitleaks installation   
+      - name: Install Gitleaks
         run: sudo apt install gitleaks -y
 
-      - name: Gitleaks code scan
-        run: gitleaks detect --source . -r gitleaks-report.json -f json
-        
-  Unit-Test:
+      - name: Gitleaks Scan
+        run: |
+          gitleaks detect --source . -r gitleaks-report.json -f json
+
+
+# ---------------- UNIT TEST ----------------
+  unit-test:
     runs-on: self-hosted
     needs: security-check
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: "17"
+          distribution: "temurin"
           cache: maven
-      - name: Unit-Test Cases
-        run: mvn clean test  
-          
-  Build_Project_Sonar_Scan:
+
+      - name: Run Tests
+        run: mvn test
+
+
+# ---------------- SONAR ----------------
+  sonar:
     runs-on: self-hosted
-    needs: Unit-Test
+    needs: unit-test
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: "17"
+          distribution: "temurin"
           cache: maven
 
-      - name: Build Project
-        run: mvn clean package
+      - name: Build for Sonar
+        run: mvn clean verify
 
-      ## Upload JAR to Artifact
-      -  name: Upload JAR artifact
-         uses: actions/upload-artifact@v4
-         with:
-           name: app-jar
-           path: target/*.jar  
-
-      - uses: actions/checkout@v6
-        with:
-        # Disabling shallow clones is recommended for improving the relevancy of reporting
-         fetch-depth: 0
       - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v8.1.0 # Ex: v4.1.0 or sha1, See the latest version at https://github.com/marketplace/actions/official-sonarqube-scan
+        uses: SonarSource/sonarqube-scan-action@v8.1.0
         env:
-         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-         SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
 
-      - name: SonarQube Quality Gate check
-        id: sonarqube-quality-gate-check
+      - name: Quality Gate
         uses: sonarsource/sonarqube-quality-gate-action@master
         with:
           pollingTimeoutSec: 600
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}    
-             
-  Build_docker_image_push:
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+
+
+# ---------------- DOCKER ----------------
+  docker-build:
     runs-on: self-hosted
-    needs: Build_Project_Sonar_Scan
+    needs: sonar
+
     steps:
       - uses: actions/checkout@v4
-      - name: Download JAR artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: app-jar
-          path: app  # this will download JAR to ./app folder
-
 
       - name: Login to Docker Hub
         uses: docker/login-action@v4
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-      
-      - name: Build and push
+
+      - name: Build and Push Docker Image
         uses: docker/build-push-action@v7
         with:
+          context: .
           push: true
           tags: saikumar27295/bankapp:latest
-
-
-
-      
-      
