@@ -64,13 +64,6 @@ jobs:
           cache: maven
       - name: Unit-Test Cases
         run: mvn clean test  
-
-## Upload JAR to Artifact
-      -  name: Upload JAR artifact
-         uses: actions/upload-artifact@v4
-         with:
-           name: app-jar
-           path: target/*.jar
           
   Build_Project_Sonar_Scan:
     runs-on: self-hosted
@@ -86,6 +79,13 @@ jobs:
 
       - name: Build Project
         run: mvn clean package
+
+      ## Upload JAR to Artifact
+      -  name: Upload JAR artifact
+         uses: actions/upload-artifact@v4
+         with:
+           name: app-jar
+           path: target/*.jar  
 
       - uses: actions/checkout@v6
         with:
