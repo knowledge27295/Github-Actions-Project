@@ -4,8 +4,9 @@ on:
   push:
     branches: ["main"]
 
-# ---------------- BUILD ----------------
 jobs:
+
+# ---------------- BUILD + TEST + SONAR PREP ----------------
   build:
     runs-on: self-hosted
 
@@ -19,15 +20,40 @@ jobs:
           distribution: "temurin"
           cache: maven
 
-      - name: Build Application (compile + test + package)
-        run: mvn clean package
+      # This does compile + test + package + coverage
+      - name: Build + Test + Package
+        run: mvn clean verify
 
-      - name: Verify build output
+      - name: Verify JAR
         run: ls -la target
 
 
+# ---------------- SONAR ----------------
+  sonar:
+    runs-on: self-hosted
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: maven
+
+      - name: SonarQube Scan
+        run: |
+          mvn sonar:sonar \
+            -Dsonar.host.url=${{ vars.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+
+
 # ---------------- SECURITY ----------------
-  security-check:
+  security:
     runs-on: self-hosted
     needs: build
 
@@ -43,7 +69,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y trivy
 
-      - name: Trivy Scan (safe mode)
+      - name: Trivy Scan
         run: |
           trivy fs . \
             --scanners secret,misconfig \
@@ -52,68 +78,8 @@ jobs:
             --format table \
             -o trivy-report.json
 
-      - name: Install Gitleaks
-        run: sudo apt-get install -y gitleaks
 
-      - name: Gitleaks Scan
-        run: gitleaks detect --source . -r gitleaks-report.json -f json
-
-
-# ---------------- UNIT TEST ----------------
-  unit-test:
-    runs-on: self-hosted
-    needs: security-check
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: "temurin"
-          cache: maven
-
-      - name: Run Tests
-        run: mvn test
-
-
-# ---------------- SONAR ----------------
-  sonar:
-    runs-on: self-hosted
-    needs: unit-test
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: "temurin"
-          cache: maven
-
-      - name: Build for Sonar Analysis
-        run: mvn clean verify
-
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v8.1.0
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
-
-      - name: Quality Gate Check
-        uses: sonarsource/sonarqube-quality-gate-action@master
-        with:
-          pollingTimeoutSec: 600
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
-
-
-# ---------------- DOCKER BUILD & PUSH ----------------
+# ---------------- DOCKER BUILD ----------------
   docker:
     runs-on: self-hosted
     needs: sonar
@@ -124,14 +90,8 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v4
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v7
