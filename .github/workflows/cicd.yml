@@ -134,7 +134,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           push: true
-          tags: knowledge27295/bankapp:latest
+          tags: saikumar27295/bankapp:latest
 
 
 
